@@ -1,0 +1,13 @@
+be8cf46f7a01ee4b6c5b7b2022a4a116 *DESCRIPTION
+88741374f8baed3454b343482a5d1db2 *NAMESPACE
+9702ef5b9eeeadd21df8722c1a95f6cc *R/asm.R
+b90c6af05e0d2e88968f28da7022952e *man/asm.Rd
+acf706439bf95f9912e7d54ff7d9c2d1 *man/asm.fit.Rd
+2da63b393563898c7a5368a791ac76f2 *man/coef.asm.Rd
+45ddbfb7f9d4ac57dfcff827224e07a1 *man/confint.asm.Rd
+86ef483b62550889447bf98960667406 *man/plot.asm.Rd
+d53d62f81b886540b07eb612de145633 *man/predict.asm.Rd
+7dcc3e9a9b201fbec66f65d247c0cfe3 *man/print.asm.Rd
+8e02e790aadb1c8d812934588e6e6eb9 *man/print.summary.asm.Rd
+c58738a83f94edc858aa1441e89fe8ff *man/residuals.asm.Rd
+adb3cd9c517fdad8090d96f122d1ec4a *man/summary.asm.Rd
