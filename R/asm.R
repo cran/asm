@@ -101,7 +101,6 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
                            method = "constant", f = 0,
                            # yleft = 0, yright = 0,
                            rule = 2)
-
     if (debug) {
       plot(domain, fn_vals, type = 'l')
       plot(domain, deriv_vals, type = 'l')
@@ -161,7 +160,6 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
 
   residuals <- Y - X %*% betahat
 
-  # browser()
   psi_vec <- fn_psi(residuals)
   psi_deriv_vec <- fn_psi_deriv(residuals)
   grad <- - t(X) %*% psi_vec
@@ -670,15 +668,31 @@ confint.asm <- function(object, parm, level = 0.95, ...) {
 #'
 #' @examples
 #' model = asm(mpg ~ cyl + hp + disp, data=mtcars)
+#' predict(model, newdata = data.frame(cyl = 4, hp = 121, disp = 80), interval = "prediction")
+#'
+#' n <- 1000
+#' X <- rnorm(n)
+#' beta <- 2
+#' Y <- beta*X + rt(n,df=3)
+#' Mod <- asm(Y ~ X)
+#' predict(Mod, newdata = data.frame(X = 1), interval = "prediction")
 #'
 predict.asm <- function(object, newdata = NULL, interval = "none",
                         level = 0.95, ...) {
   if (is.null(newdata))
     return(object$fitted.values)
-  X = model.matrix(object$formula, newdata)
+
+  if (is.data.frame(newdata)){
+    tt = terms(object$formula)
+    Terms = delete.response(tt)
+    m = model.frame(Terms, newdata, na.action = na.pass)
+    X = model.matrix(Terms, m)
+  } else {
+    X = as.matrix(newdata)
+  }
+
   if (any(X[, 1] != 1)) {
     Xint = cbind(1, X)
-    # colnames(Xint) = c("(Intercept)", colnames(X))
   } else {
     Xint = X
     X = as.matrix(X[, -1])
@@ -695,7 +709,7 @@ predict.asm <- function(object, newdata = NULL, interval = "none",
   var_pred_mean = colSums(t(Xint) * (cov %*% t(Xint))) / n
 
   if (interval == "prediction") {
-    var_pred_mean = var_pred_mean + var(object$residuals)
+    var_pred_mean = var_pred_mean + as.numeric(var(object$residuals))
   }
 
   se = sqrt(var_pred_mean)

@@ -29,5 +29,13 @@ the conditional mean (if interval = "confidence") or predicted response (if inte
 }
 \examples{
 model = asm(mpg ~ cyl + hp + disp, data=mtcars)
+predict(model, newdata = data.frame(cyl = 4, hp = 121, disp = 80), interval = "prediction")
+
+n <- 1000
+X <- rnorm(n)
+beta <- 2
+Y <- beta*X + rt(n,df=3)
+Mod <- asm(Y ~ X)
+predict(Mod, newdata = data.frame(X = 1), interval = "prediction")
 
 }
