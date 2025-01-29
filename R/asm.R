@@ -19,6 +19,7 @@ library(quantreg)
 getPhiPDF <- function(pts_evals, psi_evals) {
   K <- length(pts_evals)
   phi <- c(0, cumsum((psi_evals[-1] + psi_evals[-K]) / 2 * diff(pts_evals)))
+  phi = phi - max(phi)
   pdf <- exp(phi)
   pdf <- pdf / sum((pdf[-1] + pdf[-K]) * diff(pts_evals) / 2)
   phi <- log(pdf)
@@ -302,6 +303,12 @@ asm.fit <- function(X, Y, betapilot = "OLS",
 
   THRESH = 1e-6
 
+  if (ncol(X) == 0){
+    model_res = list(null = TRUE)
+    class(model_res) = "asm"
+    return(model_res)
+  }
+
   X = as.matrix(X)
 
   has_intercept = TRUE
@@ -498,6 +505,14 @@ asm <- function(formula, data = NULL, ...) {
 #' model = asm(mpg ~ cyl + hp + disp, data=mtcars)
 #' print(model)
 print.asm <- function(x, ...) {
+
+  cat("\nCall:", paste(deparse(x$call), sep = "\n", collapse = "\n"), sep = "")
+
+  if ("null" %in% names(x)){
+    cat("\n\nNo coefficients to fit\n")
+    return(invisible(x))
+  }
+
   cat("Estimates:\n")
   print(x$betahat)
   cat("\nStandard errors:\n")
@@ -525,6 +540,15 @@ print.asm <- function(x, ...) {
 #' model = asm(mpg ~ cyl + hp + disp, data=mtcars)
 #' summary(model)
 summary.asm <- function(object, ...) {
+
+  if ("null" %in% names(object)){
+    ans = list()
+    ans$call = object$call
+    ans$null = TRUE
+    class(ans) = "summary.asm"
+    return(ans)
+  }
+
   # Extract coefficients, standard errors, z-values and p-values
   est <- object$betahat
   stderr <- object$std_errs
@@ -561,6 +585,11 @@ print.summary.asm <- function (x, digits = max(3L, getOption("digits") - 3L),
           signif.stars = getOption("show.signif.stars"), concise = FALSE, ...) {
   cat("\nCall:", if (!concise) "\n" else " ", paste(deparse(x$call), sep = "\n", collapse = "\n"),
             if (!concise) "\n\n", sep = "")
+
+  if ("null" %in% names(x)){
+    cat("No coefficients to fit\n")
+    return(invisible(x))
+  }
 
   resid <- x$residuals
 
