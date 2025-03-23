@@ -3,6 +3,7 @@ test_that("test empty model", {
 
 })
 
+
 test_that("gaussian covariate, gaussian error", {
   n = 100
   p = 2

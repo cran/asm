@@ -296,8 +296,8 @@ asm_regression <- function(betapilot, residuals, X, Y,
 #' X <- matrix(rnorm(n * d), n, d)
 #' Y <- X %*% c(2, 3) + rnorm(n) # no intercept!
 #' asm.fit(X,Y)
-asm.fit <- function(X, Y, betapilot = "OLS",
-                    alt_iter = 1, intercept.selection = "mean",
+asm.fit <- function(X, Y, betapilot = "LAD",
+                    alt_iter = 2, intercept.selection = "mean",
                     k = 3000, max_iter = 65, kernel_pts = 2^15,
                     bw = "nrd0", kernel = "gaussian", verbose=FALSE, ...) {
 
@@ -311,9 +311,7 @@ asm.fit <- function(X, Y, betapilot = "OLS",
 
   X = as.matrix(X)
 
-  has_intercept = TRUE
-
-  ## if the first column of X is not the all-ones vector, add a column of 1s
+  ## check if X already contains intercept as column of all 1's
   if (any(X[, 1] != 1)) {
     has_intercept = FALSE
     Xtilde = X
@@ -322,6 +320,7 @@ asm.fit <- function(X, Y, betapilot = "OLS",
       colnames(X) = paste0("X", 1:ncol(X))
     }
   } else {
+    has_intercept = TRUE
     Xtilde = as.matrix(X[, -1])
 
     if (is.null(colnames(X))) {
@@ -340,6 +339,7 @@ asm.fit <- function(X, Y, betapilot = "OLS",
     LAD_fit = quantreg::rq.fit(x=X, y=Y, tau=0.5)
     betapilot = LAD_fit$coefficients
   }
+  beta_init = betapilot
 
   residuals = Y - X %*% betapilot
 
@@ -352,11 +352,13 @@ asm.fit <- function(X, Y, betapilot = "OLS",
   }
 
   for (it in 1:alt_iter) {
+
     res_asm = asm_regression(betapilot, residuals, Xtilde, Y,
                             k = k, kernel_pts = kernel_pts,
                             max_iter = max_iter,
                             bw = bw, kernel = kernel,
                             est_score_obj = TRUE, return_fn = TRUE)
+
 
     ## compare score matching objective
     scoreobj_new = res_asm$score_obj
@@ -364,7 +366,6 @@ asm.fit <- function(X, Y, betapilot = "OLS",
     if (scoreobj - scoreobj_new < THRESH && it > 1) {
       if (verbose)
        cat(paste("Alternation finished at iteration", it))
-      res_asm = res_prev
       break
     } else {
       ## continue to next iteration
@@ -383,8 +384,9 @@ asm.fit <- function(X, Y, betapilot = "OLS",
       muhat = 0
 
     betapilot = c(muhat, thetahat_asm)
-
+    residuals = Y - Xtilde %*% thetahat_asm - muhat
   }
+
 
   info_asm = res_asm$info_asm
   thetahat_asm = res_asm$thetahat
@@ -433,6 +435,7 @@ asm.fit <- function(X, Y, betapilot = "OLS",
 
   model_res <- list(
     betahat = betahat,
+    beta_init = beta_init,
     std_errs = std_errs,
     fitted.values = fitted.values,
     residuals = residuals,

@@ -1,8 +1,8 @@
-13a65cf533201bb8fb5ac3efd3708e58 *DESCRIPTION
+0f0fdaa4b373ca32a7cbdfd6432c6d28 *DESCRIPTION
 88741374f8baed3454b343482a5d1db2 *NAMESPACE
-502ec76ba201128230a390b71fe4c49c *R/asm.R
+a3a010e1f52b7670b48d5271a9515bb6 *R/asm.R
 b90c6af05e0d2e88968f28da7022952e *man/asm.Rd
-acf706439bf95f9912e7d54ff7d9c2d1 *man/asm.fit.Rd
+f42f6fbbad38e14529898b49542b168d *man/asm.fit.Rd
 2da63b393563898c7a5368a791ac76f2 *man/coef.asm.Rd
 45ddbfb7f9d4ac57dfcff827224e07a1 *man/confint.asm.Rd
 86ef483b62550889447bf98960667406 *man/plot.asm.Rd
@@ -12,4 +12,4 @@ edc4a717847a73152a8176e4fe792290 *man/predict.asm.Rd
 c58738a83f94edc858aa1441e89fe8ff *man/residuals.asm.Rd
 adb3cd9c517fdad8090d96f122d1ec4a *man/summary.asm.Rd
 c42b56494b8534ed181d7a9d1ed500bc *tests/testthat.R
-60d665af436c9b14551af3d54c6a752b *tests/testthat/test-asm.R
+d8f57c0b1880e26230c00944a6514481 *tests/testthat/test-asm.R

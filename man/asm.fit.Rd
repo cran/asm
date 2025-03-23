@@ -7,8 +7,8 @@
 asm.fit(
   X,
   Y,
-  betapilot = "OLS",
-  alt_iter = 1,
+  betapilot = "LAD",
+  alt_iter = 2,
   intercept.selection = "mean",
   k = 3000,
   max_iter = 65,

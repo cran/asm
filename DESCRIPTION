@@ -2,7 +2,7 @@ Package: asm
 Type: Package
 Title: Optimal Convex M-Estimation for Linear Regression via Antitonic
         Score Matching
-Version: 0.2.1
+Version: 0.2.2
 Authors@R: c(person("Yu-Chun", "Kao", email="ethankao1988@gmail.com", role=c("aut")),
             person(given=c("Oliver", "Y."), family="Feng", email="screelt@gmail.com", role=c("aut")),
             person("Lucy", "Xia", email="lucyxia@ust.hk", role=c("aut")),
@@ -14,11 +14,11 @@ Description: Performs linear regression with respect to a data-driven convex los
 Encoding: UTF-8
 Depends: R (>= 3.1)
 Imports: fdrtool, pracma, Iso, MASS, quantreg
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.2
 Suggests: testthat (>= 3.0.0)
 Config/testthat/edition: 3
 NeedsCompilation: no
-Packaged: 2025-01-29 03:45:16 UTC; minx
+Packaged: 2025-03-23 01:59:29 UTC; mx76
 Author: Yu-Chun Kao [aut],
   Oliver Y. Feng [aut],
   Lucy Xia [aut],
@@ -27,4 +27,4 @@ Author: Yu-Chun Kao [aut],
   Richard J. Samworth [aut]
 Maintainer: Min Xu <min.cut@gmail.com>
 Repository: CRAN
-Date/Publication: 2025-01-29 04:00:02 UTC
+Date/Publication: 2025-03-23 03:20:02 UTC
