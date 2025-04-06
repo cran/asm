@@ -8,6 +8,7 @@ asm.fit(
   X,
   Y,
   betapilot = "LAD",
+  symmetrize = TRUE,
   alt_iter = 2,
   intercept.selection = "mean",
   k = 3000,
@@ -27,12 +28,15 @@ asm.fit(
 \item{betapilot}{initial estimate of the regression coefficients:
 can be "LAD", "OLS" or a vector of coefficients}
 
+\item{symmetrize}{logical; if TRUE, estimate a symmetric loss function}
+
 \item{alt_iter}{number of iterations of the alternating procedure:
 when alt_iter == 1, this function is equivalent to asm_regression}
 
 \item{intercept.selection}{mean or median of the residuals
 if intercept.selection == "median",
-then the standard error of the intercept estimate is set to NA}
+then the standard error of the intercept estimate is set to NA.
+Ignored if symmetrize == TRUE}
 
 \item{k}{the density quantile function is evaluated at (0, 1/\code{k}, 2/\code{k}, ..., 1)}
 
@@ -73,6 +77,6 @@ Performs linear regression via M-estimation with respect to a data-driven convex
 \examples{
 n <- 1000 ; d <- 2
 X <- matrix(rnorm(n * d), n, d)
-Y <- X \%*\% c(2, 3) + rnorm(n) # no intercept!
+Y <- X \%*\% c(2, 3) + 1 + rnorm(n)
 asm.fit(X,Y)
 }

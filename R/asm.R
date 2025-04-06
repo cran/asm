@@ -35,9 +35,9 @@ getPhiPDF <- function(pts_evals, psi_evals) {
 ## "densities", represented as evaluations on "grid"
 ##
 ## INPUT: densities -- vector of density values
-##        grid -- domain of "densities"
+##        grid -- points at which the density is evaluated
 ##        k -- number of discrete points between [0,1] at which
-##             to evaluate Jhat and (psi^*)?
+##             to evaluate Jhat and (psi^*)
 ##
 ## OUTPUT: psi -- function  R -> R
 ##         psi_deriv -- function  R -> R
@@ -48,6 +48,7 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
                                           lcm = FALSE, k1=1, k2=k, ptm) {
   if (debug) browser()
   K <- length(grid)
+
   # Interpolate between density values on the grid
   f <- approxfun(grid, densities, method = "linear", rule = 2)
   masses <- (densities[-1] + densities[-K])/2 * diff(grid)
@@ -60,6 +61,7 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
   u <- 0:k / k # customise this for light-tailed densities for plotting purposes?
   J <- f(Q(u))
 
+  ## plotting LCM of the density quantile function
   if (lcm) {
     lcm <- gcmlcm(u, J, type = "lcm")
     if (debug) {
@@ -120,22 +122,19 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
 ## truncation not implemented
 ## ... are passed to density();
 ## see density() for more details (kernel, bw, etc.)
-kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15,
-                               #  truncation_lim = NULL, set_to_zero = FALSE
-                               is_sorted = FALSE,  ...) {
-  if (!is_sorted) {
-    residuals <- sort(residuals)
-  }
+kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15, ...) {
+
+  residuals <- sort(residuals)
 
   supp1 = range(residuals) + 3*bw.nrd0(residuals) * c(-1, 1)
   supp2 = median(residuals) + IQR(residuals) * c(-20, 20)
-
   supp = c(max(supp1[1], supp2[1]), min(supp1[2], supp2[2]))
 
   kde <- density(residuals, n = kernel_pts,
                 from=supp[1], to=supp[2], ...)
 
   n = length(residuals)
+
   k = max(k, 2 * n)
   if (n > 2) {
     skip = 2 * floor(k / n)
@@ -144,7 +143,7 @@ kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15,
   }
 
   iso_res = isotonize_score_given_density(kde$x, kde$y,
-            k = k, k1 = 1 + skip, k2 = k - skip)
+            k=k, k1=1+skip, k2=k-skip)
 
   return(iso_res)
 }
@@ -153,7 +152,7 @@ kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15,
 ### General root finding ####
 # Gives the betahat that satisfies sum_i Xi psi(Yi-<Xi,betahat>) = 0
 linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
-                                        max_iter = 55) {
+                                        max_iter = 55, verbose=FALSE) {
   betahat <- betainit
   d <- ncol(X)
   N <- nrow(X)
@@ -171,7 +170,7 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
   for (l in 1:max_iter) {
 
     alpha <- 1
-    update <- solve(H + diag(nrow(H)), grad)
+    update <- solve(H - diag(nrow(H)), grad)
     while (TRUE) {
       betatemp <- betahat - alpha * update
 
@@ -187,6 +186,10 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
         alpha <- 0.8 * alpha
     }
 
+    if (verbose){
+      print(sqrt(sum(grad^2)))
+    }
+
     if (sqrt(sum(grad^2)) < CONV_THRESH) {
       return(list(betahat = betahat, conv = 1))
     }
@@ -200,7 +203,16 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
   return(list(betahat = betahat, conv = 0))
 }
 
-### without cross fitting, return theta_hat, i.e. no intercept term
+## Estimate antitonic score psi from residuals, then
+## compute
+##
+## min_theta sum_i ell( Yi - offset - (Xi - Xbar)' theta )
+##
+## where offset = betapilot[1] + Xbar' betapilot[-1]
+##
+## REQUIRE: betapilot[1] is the intercept;
+##          betapilot has dimension ncol(X) + 1
+##
 asm_regression <- function(betapilot, residuals, X, Y,
                            k = 3000, kernel_pts=2^15,
                            est_info = FALSE, est_score_obj = FALSE,
@@ -221,7 +233,9 @@ asm_regression <- function(betapilot, residuals, X, Y,
                                      Y_offset,
                                      fn_psi, fn_psi_deriv,
                                      max_iter = max_iter)
+
   return_list = list(thetahat = root$betahat, conv = root$conv)
+
   if (return_fn) {
     return_list$psi = fn_psi
     return_list$psi_deriv = fn_psi_deriv
@@ -235,14 +249,56 @@ asm_regression <- function(betapilot, residuals, X, Y,
       return_list$score_obj = mean(temp2) + temp1
     }
   }
-  # if (est_info) {
-  #   return_list$info_asm = mean(fn_psi(Y - X %*% root$betahat-betapilot[1])^2)
-  # }
 
   return(return_list)
 }
 
 
+## one iteration of asm regression with symmetric loss
+##
+## min_beta sum_i ell( Yi  - Xi' beta )
+##
+## ASSUME: betapilot has dimension ncol(X)
+##
+asm_regression_sym <- function(betapilot, residuals, X, Y,
+                            k = 3000, kernel_pts=2^15,
+                            est_info = FALSE, est_score_obj = FALSE,
+                            symmetrize = TRUE,
+                            max_iter = 100, return_fn = FALSE,
+                            bw = "nrd0", kernel="gaussian") {
+
+  res = kde_decr_score_est(residuals, k = k, kernel_pts = kernel_pts,
+                           bw = bw, kernel = kernel)
+
+  fn_psi = function(x) {
+    return((res$psi(x) - res$psi(-x)) / 2)
+  }
+  fn_psi_deriv = function(x) {
+    return((res$psi_deriv(x) + res$psi_deriv(-x)) / 2)
+  }
+
+  root = linear_regression_newton_fn(betapilot, X, Y,
+                                     fn_psi, fn_psi_deriv,
+                                     max_iter = max_iter)
+
+  return_list = list(thetahat = root$betahat, conv = root$conv)
+
+  if (return_fn) {
+    return_list$psi = fn_psi
+    return_list$psi_deriv = fn_psi_deriv
+  }
+  if (est_info || est_score_obj) {
+    resids = Y - X %*% root$betahat
+    temp1 = mean(fn_psi(resids)^2)
+    return_list$info_asm = temp1
+    if (est_score_obj) {
+      temp2 = 2 * fn_psi_deriv(resids)
+      return_list$score_obj = mean(temp2) + temp1
+    }
+  }
+
+  return(return_list)
+}
 
 
 
@@ -258,11 +314,13 @@ asm_regression <- function(betapilot, residuals, X, Y,
 #' @param Y response vector
 #' @param betapilot initial estimate of the regression coefficients:
 #' can be "LAD", "OLS" or a vector of coefficients
+#' @param symmetrize logical; if TRUE, estimate a symmetric loss function
 #' @param alt_iter number of iterations of the alternating procedure:
 #' when alt_iter == 1, this function is equivalent to asm_regression
 #' @param intercept.selection mean or median of the residuals
 #' if intercept.selection == "median",
-#' then the standard error of the intercept estimate is set to NA
+#' then the standard error of the intercept estimate is set to NA.
+#' Ignored if symmetrize == TRUE
 #' @param k the density quantile function is evaluated at (0, 1/\code{k}, 2/\code{k}, ..., 1)
 #' @param max_iter maximum number of iterations for the damped Newton–Raphson algorithm
 #' when minimizing the convex loss function
@@ -294,14 +352,18 @@ asm_regression <- function(betapilot, residuals, X, Y,
 #' @examples
 #' n <- 1000 ; d <- 2
 #' X <- matrix(rnorm(n * d), n, d)
-#' Y <- X %*% c(2, 3) + rnorm(n) # no intercept!
+#' Y <- X %*% c(2, 3) + 1 + rnorm(n)
 #' asm.fit(X,Y)
-asm.fit <- function(X, Y, betapilot = "LAD",
+asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
                     alt_iter = 2, intercept.selection = "mean",
                     k = 3000, max_iter = 65, kernel_pts = 2^15,
                     bw = "nrd0", kernel = "gaussian", verbose=FALSE, ...) {
 
   THRESH = 1e-6
+
+  if (symmetrize == FALSE){
+    cat("\nNote: Using asymmetric loss - must specify the intercept to be either the mean or the median\n")
+  }
 
   if (ncol(X) == 0){
     model_res = list(null = TRUE)
@@ -310,6 +372,9 @@ asm.fit <- function(X, Y, betapilot = "LAD",
   }
 
   X = as.matrix(X)
+
+  if (symmetrize)
+    intercept.selection = "none"
 
   ## check if X already contains intercept as column of all 1's
   if (any(X[, 1] != 1)) {
@@ -321,6 +386,7 @@ asm.fit <- function(X, Y, betapilot = "LAD",
     }
   } else {
     has_intercept = TRUE
+
     Xtilde = as.matrix(X[, -1])
 
     if (is.null(colnames(X))) {
@@ -347,25 +413,55 @@ asm.fit <- function(X, Y, betapilot = "LAD",
 
   res_prev = NULL
 
-  if (!has_intercept) {
+  ## if no intercept and no symmetric, then
+  ## betapilot input to asm_regression should always
+  ## be length d+1
+  ##
+  ## betapilot input to asm_regression_sym should always
+  ## be length d
+  if (!has_intercept && !symmetrize) {
     betapilot = c(0, betapilot)
   }
 
   for (it in 1:alt_iter) {
 
-    res_asm = asm_regression(betapilot, residuals, Xtilde, Y,
+    if (!symmetrize){
+      res_asm = asm_regression(betapilot, residuals, Xtilde, Y,
                             k = k, kernel_pts = kernel_pts,
                             max_iter = max_iter,
                             bw = bw, kernel = kernel,
                             est_score_obj = TRUE, return_fn = TRUE)
 
+      thetahat_asm = res_asm$thetahat
+      resid_with_mean = Y - Xtilde %*% thetahat_asm
+      if (intercept.selection == "mean" && has_intercept) {
+        muhat = mean(resid_with_mean)
+      } else if (intercept.selection == "median" && has_intercept){
+        muhat = median(resid_with_mean)
+      } else {
+        muhat = 0
+      }
+      betapilot = c(muhat, thetahat_asm)
+
+    } else {
+
+      res_asm = asm_regression_sym(betapilot, residuals, X, Y,
+                            k = k, kernel_pts = kernel_pts,
+                            max_iter = max_iter,
+                            bw = bw, kernel = kernel,
+                            est_score_obj = TRUE, return_fn = TRUE)
+
+      betapilot = res_asm$thetahat
+    }
+
+    residuals = Y - X %*% betapilot
 
     ## compare score matching objective
     scoreobj_new = res_asm$score_obj
 
     if (scoreobj - scoreobj_new < THRESH && it > 1) {
       if (verbose)
-       cat(paste("Alternation finished at iteration", it))
+       print(paste("Alternation finished at iteration", it))
       break
     } else {
       ## continue to next iteration
@@ -373,29 +469,22 @@ asm.fit <- function(X, Y, betapilot = "LAD",
       res_prev = res_asm
     }
 
-    thetahat_asm = res_asm$thetahat
-    resid_with_mean = Y - Xtilde %*% thetahat_asm
-
-    if (intercept.selection == "mean" && has_intercept) {
-      muhat = mean(resid_with_mean)
-    } else if (intercept.selection == "median" && has_intercept){
-      muhat = median(resid_with_mean)
-    } else
-      muhat = 0
-
-    betapilot = c(muhat, thetahat_asm)
-    residuals = Y - Xtilde %*% thetahat_asm - muhat
   }
 
 
   info_asm = res_asm$info_asm
   thetahat_asm = res_asm$thetahat
-  I_mat = info_asm * var(Xtilde)
+
+  if (!symmetrize){
+    I_mat = info_asm * var(Xtilde)
+  } else {
+    I_mat = info_asm * (1/n) * t(X) %*% X
+  }
+
   v22 = solve(I_mat)
 
-  resid_with_mean = Y - Xtilde %*% thetahat_asm
-
   if (intercept.selection == "mean" && has_intercept) {
+      resid_with_mean = Y - Xtilde %*% thetahat_asm
       muhat = mean(resid_with_mean)
       noise_var = var(resid_with_mean)
       Xbar <- colMeans(Xtilde)
@@ -408,15 +497,17 @@ asm.fit <- function(X, Y, betapilot = "LAD",
       Cov_mat[-1, 1] = t(v12)
       std_errs = sqrt(diag(Cov_mat) / n)
     } else if (intercept.selection == "median" && has_intercept) {
+      resid_with_mean = Y - Xtilde %*% thetahat_asm
       muhat = median(resid_with_mean)
       ## needs to be fixed
       std_errs = c(NA, sqrt(diag(v22) / n))
+      Cov_mat = NULL
     } else {
       std_errs = sqrt(diag(v22) / n )
       Cov_mat = v22
     }
 
-  if (has_intercept) {
+  if (has_intercept && !symmetrize) {
     betahat = c(muhat, thetahat_asm)
   } else {
     betahat = thetahat_asm
@@ -444,7 +535,9 @@ asm.fit <- function(X, Y, betapilot = "LAD",
     info_asm = info_asm,
     I_mat = I_mat,
     Cov_mat = Cov_mat,
-    psi = res_asm$psi
+    psi = res_asm$psi,
+    symmetrize = symmetrize,
+    intercept.selection = intercept.selection
   )
 
   class(model_res) = "asm"
@@ -516,7 +609,7 @@ print.asm <- function(x, ...) {
     return(invisible(x))
   }
 
-  cat("Estimates:\n")
+  cat("\nEstimates:\n")
   print(x$betahat)
   cat("\nStandard errors:\n")
   print(x$std_errs)
