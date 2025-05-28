@@ -4,7 +4,14 @@
 \alias{predict.asm}
 \title{Predict new responses using an \code{asm} regression model.}
 \usage{
-\method{predict}{asm}(object, newdata = NULL, interval = "none", level = 0.95, ...)
+\method{predict}{asm}(
+  object,
+  newdata = NULL,
+  interval = "none",
+  level = 0.95,
+  debug = FALSE,
+  ...
+)
 }
 \arguments{
 \item{object}{asm object}
@@ -15,6 +22,8 @@
 either "none", "confidence" or "prediction". Default is "none".}
 
 \item{level}{confidence level}
+
+\item{debug}{boolean; enables debug mode}
 
 \item{...}{additional arguments to ensure compatibility with the generic function predict()}
 }
@@ -35,7 +44,7 @@ n <- 1000
 X <- rnorm(n)
 beta <- 2
 Y <- beta*X + rt(n,df=3)
-Mod <- asm(Y ~ X)
-predict(Mod, newdata = data.frame(X = 1), interval = "prediction")
+asm_model <- asm(Y ~ X)
+predict(asm_model, newdata = data.frame(X = 1), interval = "prediction")
 
 }

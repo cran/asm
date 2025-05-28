@@ -8,11 +8,12 @@ asm.fit(
   X,
   Y,
   betapilot = "LAD",
-  symmetrize = TRUE,
+  error_quantile = NULL,
+  symmetric = TRUE,
   alt_iter = 2,
   intercept.selection = "mean",
   k = 3000,
-  max_iter = 65,
+  max_iter = 200,
   kernel_pts = 2^15,
   bw = "nrd0",
   kernel = "gaussian",
@@ -28,15 +29,19 @@ asm.fit(
 \item{betapilot}{initial estimate of the regression coefficients:
 can be "LAD", "OLS" or a vector of coefficients}
 
-\item{symmetrize}{logical; if TRUE, estimate a symmetric loss function}
+\item{error_quantile}{quantile of the residuals to be returned as intercept
+Used only if intercept.selection = "quantile"
+If error_quantile = 0.5, then the intercept is the median of the residual
+Ignored if symmetric = TRUE}
+
+\item{symmetric}{logical; if TRUE, estimate a symmetric loss function}
 
 \item{alt_iter}{number of iterations of the alternating procedure:
 when alt_iter == 1, this function is equivalent to asm_regression}
 
-\item{intercept.selection}{mean or median of the residuals
-if intercept.selection == "median",
-then the standard error of the intercept estimate is set to NA.
-Ignored if symmetrize == TRUE}
+\item{intercept.selection}{mean, median, or quantile of the residuals
+If intercept.selection = "quantile", then error_quantile specifies the quantile value
+Ignored if symmetric == TRUE}
 
 \item{k}{the density quantile function is evaluated at (0, 1/\code{k}, 2/\code{k}, ..., 1)}
 
@@ -65,10 +70,11 @@ i.e. the parameter "kernel" in density()}
  \item{\code{residuals}:}{residuals}
  \item{\code{zvals}:}{z-values}
  \item{\code{sig_vals}:}{p-values}
- \item{\code{info_asm}:}{antitonic information}
+ \item{\code{info_asm}:}{estimated antitonic information}
  \item{\code{I_mat}:}{estimated antitonic information matrix}
  \item{\code{Cov_mat}:}{asymptotic covariance matrix of the estimated coefficients}
  \item{\code{psi}:}{estimated antitonic score function}
+ \item{\code{symmetric}:}{logical; indicating whether the loss is constrained to be symmetric}
 }
 }
 \description{
@@ -78,5 +84,8 @@ Performs linear regression via M-estimation with respect to a data-driven convex
 n <- 1000 ; d <- 2
 X <- matrix(rnorm(n * d), n, d)
 Y <- X \%*\% c(2, 3) + 1 + rnorm(n)
-asm.fit(X,Y)
+asm.fit(X, Y)
+
+Y <- X \%*\% c(2, 3) + rexp(n)
+asm.fit(X, Y, symmetric=FALSE)
 }

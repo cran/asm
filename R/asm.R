@@ -42,7 +42,7 @@ getPhiPDF <- function(pts_evals, psi_evals) {
 ## OUTPUT: psi -- function  R -> R
 ##         psi_deriv -- function  R -> R
 ##
-isotonize_score_given_density <- function(grid, densities, k = 3000,
+isotonize_score_given_density <- function(grid, densities, J_eval = NULL, k = 3000,
                                           return_deriv = TRUE,
                                           debug = FALSE,
                                           lcm = FALSE, k1=1, k2=k, ptm) {
@@ -60,6 +60,10 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
 
   u <- 0:k / k # customise this for light-tailed densities for plotting purposes?
   J <- f(Q(u))
+
+  # Evaluate J at a given point J_eval (used to estimate the intercept standard
+  # error when intercept.selection = "quantile" in asm.fit)
+  if (!is.null(J_eval)) J_eval <- f(Q(J_eval))
 
   ## plotting LCM of the density quantile function
   if (lcm) {
@@ -109,9 +113,10 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
       plot(domain, deriv_vals, type = 'l')
     }
     if (lcm) {
-      return(list(psi = psi, psi_deriv = psi_deriv, J = J, Jhat = lcm))
+      return(list(psi = psi, psi_deriv = psi_deriv, J = J, J_eval = J_eval,
+                  Jhat = lcm))
     }
-    return(list(psi = psi, psi_deriv = psi_deriv))
+    return(list(psi = psi, psi_deriv = psi_deriv, J_eval = J_eval))
   } else {
     return(psi)
   }
@@ -122,7 +127,7 @@ isotonize_score_given_density <- function(grid, densities, k = 3000,
 ## truncation not implemented
 ## ... are passed to density();
 ## see density() for more details (kernel, bw, etc.)
-kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15, ...) {
+kde_decr_score_est <- function(residuals, quantile = NULL, k = 3000, kernel_pts = 2^15, ...) {
 
   residuals <- sort(residuals)
 
@@ -142,7 +147,7 @@ kde_decr_score_est <- function(residuals, k = 3000, kernel_pts = 2^15, ...) {
     skip = 0
   }
 
-  iso_res = isotonize_score_given_density(kde$x, kde$y,
+  iso_res = isotonize_score_given_density(kde$x, kde$y, J_eval = quantile,
             k=k, k1=1+skip, k2=k-skip)
 
   return(iso_res)
@@ -158,19 +163,32 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
   N <- nrow(X)
   CONV_THRESH <- (d * N)^0.5 * 1e-14
 
+  hess_cond_tol = 1e6
+
+  if (d == 0){
+    return(list(betahat = matrix(0, 0, 1), conv=1))
+  }
+
   residuals <- Y - X %*% betahat
 
   psi_vec <- fn_psi(residuals)
   psi_deriv_vec <- fn_psi_deriv(residuals)
   grad <- - t(X) %*% psi_vec
 
-  Xpsi <- X * psi_deriv_vec
+  Xpsi <- X * as.vector(psi_deriv_vec)
   H <- t(Xpsi) %*% X
 
   for (l in 1:max_iter) {
 
     alpha <- 1
-    update <- solve(H - diag(nrow(H)), grad)
+
+    cond_num = kappa(H)
+
+    if (cond_num < hess_cond_tol)
+      update <- solve(H - diag(nrow(H)), grad)
+    else
+      update <- grad
+
     while (TRUE) {
       betatemp <- betahat - alpha * update
 
@@ -196,12 +214,58 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
 
     psi_deriv_vec = fn_psi_deriv(resid_temp)
 
-    Xpsi <- X * psi_deriv_vec
+    Xpsi <- X * as.vector(psi_deriv_vec)
     H <- t(Xpsi) %*% X
 
   }
   return(list(betahat = betahat, conv = 0))
 }
+
+
+## Jointly computes theta_hat and mu_hat
+## NOT used currently
+asm_regression_test <- function(betapilot, residuals, X, Y, quantile = NULL,
+                                k = 3000, kernel_pts=2^15,
+                                est_info = FALSE, est_score_obj = FALSE,
+                                max_iter = 65, return_fn = FALSE,
+                                bw = "nrd0", kernel = "gaussian") {
+
+  res = kde_decr_score_est(residuals, quantile = quantile, k = k, kernel_pts = kernel_pts,
+                           bw = bw, kernel = kernel)
+
+  fn_psi_deriv = res$psi_deriv
+  fn_psi = res$psi
+
+  n = length(Y)
+  Xint = cbind(rep(1, n), X)
+
+  root = linear_regression_newton_fn(betapilot, Xint,
+                                     Y,
+                                     fn_psi, fn_psi_deriv,
+                                     max_iter = max_iter)
+
+  return_list = list(thetahat = root$betahat[-1],
+                     muhat = root$betahat[1],
+                     conv = root$conv)
+
+  if (return_fn) {
+    return_list$psi = fn_psi
+    return_list$psi_deriv = fn_psi_deriv
+  }
+  if (est_info || est_score_obj) {
+    resids = Y - X %*% root$betahat[-1]
+    temp1 = mean(fn_psi(resids)^2)
+    if (!is.null(quantile)) return_list$quantile <- res$J_eval
+    return_list$info_asm = temp1
+    if (est_score_obj) {
+      temp2 = 2 * fn_psi_deriv(resids)
+      return_list$score_obj = mean(temp2) + temp1
+    }
+  }
+
+  return(return_list)
+}
+
 
 ## Estimate antitonic score psi from residuals, then
 ## compute
@@ -213,14 +277,15 @@ linear_regression_newton_fn <- function(betainit, X, Y, fn_psi, fn_psi_deriv,
 ## REQUIRE: betapilot[1] is the intercept;
 ##          betapilot has dimension ncol(X) + 1
 ##
-asm_regression <- function(betapilot, residuals, X, Y,
+asm_regression <- function(betapilot, residuals, X, Y, quantile = NULL,
                            k = 3000, kernel_pts=2^15,
                            est_info = FALSE, est_score_obj = FALSE,
                            max_iter = 65, return_fn = FALSE,
-                           bw = "nrd0", kernel="gaussian") {
+                           bw = "nrd0", kernel = "gaussian") {
 
-  res = kde_decr_score_est(residuals, k = k, kernel_pts = kernel_pts,
+  res = kde_decr_score_est(residuals, quantile = quantile, k = k, kernel_pts = kernel_pts,
                           bw = bw, kernel = kernel)
+
   fn_psi_deriv = res$psi_deriv
   fn_psi = res$psi
 
@@ -243,6 +308,7 @@ asm_regression <- function(betapilot, residuals, X, Y,
   if (est_info || est_score_obj) {
     resids = Y_offset - Xcentered %*% root$betahat
     temp1 = mean(fn_psi(resids)^2)
+    if (!is.null(quantile)) return_list$quantile <- res$J_eval
     return_list$info_asm = temp1
     if (est_score_obj) {
       temp2 = 2 * fn_psi_deriv(resids)
@@ -263,7 +329,6 @@ asm_regression <- function(betapilot, residuals, X, Y,
 asm_regression_sym <- function(betapilot, residuals, X, Y,
                             k = 3000, kernel_pts=2^15,
                             est_info = FALSE, est_score_obj = FALSE,
-                            symmetrize = TRUE,
                             max_iter = 100, return_fn = FALSE,
                             bw = "nrd0", kernel="gaussian") {
 
@@ -281,7 +346,7 @@ asm_regression_sym <- function(betapilot, residuals, X, Y,
                                      fn_psi, fn_psi_deriv,
                                      max_iter = max_iter)
 
-  return_list = list(thetahat = root$betahat, conv = root$conv)
+  return_list = list(betahat = root$betahat, conv = root$conv)
 
   if (return_fn) {
     return_list$psi = fn_psi
@@ -314,13 +379,16 @@ asm_regression_sym <- function(betapilot, residuals, X, Y,
 #' @param Y response vector
 #' @param betapilot initial estimate of the regression coefficients:
 #' can be "LAD", "OLS" or a vector of coefficients
-#' @param symmetrize logical; if TRUE, estimate a symmetric loss function
+#' @param symmetric logical; if TRUE, estimate a symmetric loss function
 #' @param alt_iter number of iterations of the alternating procedure:
 #' when alt_iter == 1, this function is equivalent to asm_regression
-#' @param intercept.selection mean or median of the residuals
-#' if intercept.selection == "median",
-#' then the standard error of the intercept estimate is set to NA.
-#' Ignored if symmetrize == TRUE
+#' @param error_quantile quantile of the residuals to be returned as intercept
+#' Used only if intercept.selection = "quantile"
+#' If error_quantile = 0.5, then the intercept is the median of the residual
+#' Ignored if symmetric = TRUE
+#' @param intercept.selection mean, median, or quantile of the residuals
+#' If intercept.selection = "quantile", then error_quantile specifies the quantile value
+#' Ignored if symmetric == TRUE
 #' @param k the density quantile function is evaluated at (0, 1/\code{k}, 2/\code{k}, ..., 1)
 #' @param max_iter maximum number of iterations for the damped Newton–Raphson algorithm
 #' when minimizing the convex loss function
@@ -341,10 +409,11 @@ asm_regression_sym <- function(betapilot, residuals, X, Y,
 #'  \item{\code{residuals}:}{residuals}
 #'  \item{\code{zvals}:}{z-values}
 #'  \item{\code{sig_vals}:}{p-values}
-#'  \item{\code{info_asm}:}{antitonic information}
+#'  \item{\code{info_asm}:}{estimated antitonic information}
 #'  \item{\code{I_mat}:}{estimated antitonic information matrix}
 #'  \item{\code{Cov_mat}:}{asymptotic covariance matrix of the estimated coefficients}
 #'  \item{\code{psi}:}{estimated antitonic score function}
+#'  \item{\code{symmetric}:}{logical; indicating whether the loss is constrained to be symmetric}
 #' }
 #'
 #' @export
@@ -353,30 +422,49 @@ asm_regression_sym <- function(betapilot, residuals, X, Y,
 #' n <- 1000 ; d <- 2
 #' X <- matrix(rnorm(n * d), n, d)
 #' Y <- X %*% c(2, 3) + 1 + rnorm(n)
-#' asm.fit(X,Y)
-asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
+#' asm.fit(X, Y)
+#'
+#' Y <- X %*% c(2, 3) + rexp(n)
+#' asm.fit(X, Y, symmetric=FALSE)
+asm.fit <- function(X, Y, betapilot = "LAD", error_quantile = NULL,
+                    symmetric = TRUE,
                     alt_iter = 2, intercept.selection = "mean",
-                    k = 3000, max_iter = 65, kernel_pts = 2^15,
+                    k = 3000, max_iter = 200, kernel_pts = 2^15,
                     bw = "nrd0", kernel = "gaussian", verbose=FALSE, ...) {
 
   THRESH = 1e-6
 
-  if (symmetrize == FALSE){
-    cat("\nNote: Using asymmetric loss - must specify the intercept to be either the mean or the median\n")
+  if (!symmetric){
+    # Allow for general quantiles; q = 0.5 is the default
+    q <- error_quantile
+    if (is.null(q)) q <- 0.5
+    if (verbose) cat("\nNote: Using asymmetric loss - estimating the intercept by the",
+                     error_quantile, intercept.selection, "of the residuals\n")
   }
+
+  X = as.matrix(X)
 
   if (ncol(X) == 0){
     model_res = list(null = TRUE)
     class(model_res) = "asm"
     return(model_res)
   }
+  if (nrow(X) < 3){
+    stop("The input must contain at least 3 rows.")
+  }
+  if (nrow(X) )
 
-  X = as.matrix(X)
 
-  if (symmetrize)
+  if (symmetric)
     intercept.selection = "none"
+  if (intercept.selection == "median"){
+    q = 0.5
+    intercept.selection = "quantile"
+  }
 
-  ## check if X already contains intercept as column of all 1's
+  ## check if X already contains intercept as column of all 1s
+  ## Xtilde used for asymmetric loss: equals X if no intercept, otherwise it is
+  ##    X without the column of all 1s
   if (any(X[, 1] != 1)) {
     has_intercept = FALSE
     Xtilde = X
@@ -393,16 +481,17 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
       if (ncol(X) == 1) {
         colnames(X) = c("(Intercept)")
       } else {
-      colnames(X) = c("(Intercept)", paste0("X", 2:ncol(X)))
+      colnames(X) = c("(Intercept)", paste0("X", 1:(ncol(X)-1)) )
       }
     }
   }
   n = nrow(X)
 
-  if (betapilot[1]=="OLS") {
+  if (betapilot[1] == "OLS") {
     betapilot = solve(t(X) %*% X, t(X) %*% Y)
-  } else if (betapilot[1]=="LAD") {
-    LAD_fit = quantreg::rq.fit(x=X, y=Y, tau=0.5)
+  } else if (betapilot[1] == "LAD") {
+    # Suppress 'solution may not be unique' warnings or make them more informative
+    LAD_fit <- suppressWarnings(quantreg::rq.fit(x=X, y=Y, tau=0.5))
     betapilot = LAD_fit$coefficients
   }
   beta_init = betapilot
@@ -410,34 +499,41 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
   residuals = Y - X %*% betapilot
 
   scoreobj = Inf
-
   res_prev = NULL
 
-  ## if no intercept and no symmetric, then
+  ## if asymmetric and no intercept, then
   ## betapilot input to asm_regression should always
   ## be length d+1
   ##
   ## betapilot input to asm_regression_sym should always
   ## be length d
-  if (!has_intercept && !symmetrize) {
+  if (!has_intercept && !symmetric) {
     betapilot = c(0, betapilot)
   }
 
+
   for (it in 1:alt_iter) {
 
-    if (!symmetrize){
-      res_asm = asm_regression(betapilot, residuals, Xtilde, Y,
+    if (!symmetric){
+
+
+      res_asm = asm_regression(betapilot, residuals, quantile = q,
+                               Xtilde, Y,
                             k = k, kernel_pts = kernel_pts,
                             max_iter = max_iter,
                             bw = bw, kernel = kernel,
                             est_score_obj = TRUE, return_fn = TRUE)
 
+
+
+
       thetahat_asm = res_asm$thetahat
-      resid_with_mean = Y - Xtilde %*% thetahat_asm
+      resid_uncentered = Y - Xtilde %*% thetahat_asm
+
       if (intercept.selection == "mean" && has_intercept) {
-        muhat = mean(resid_with_mean)
-      } else if (intercept.selection == "median" && has_intercept){
-        muhat = median(resid_with_mean)
+        muhat = mean(resid_uncentered)
+      } else if (intercept.selection == "quantile" && has_intercept){
+        muhat = quantile(resid_uncentered, q)
       } else {
         muhat = 0
       }
@@ -451,10 +547,22 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
                             bw = bw, kernel = kernel,
                             est_score_obj = TRUE, return_fn = TRUE)
 
-      betapilot = res_asm$thetahat
+      betahat_asm = res_asm$betahat
+      betapilot = betahat_asm
+
     }
 
-    residuals = Y - X %*% betapilot
+    info_asm = res_asm$info_asm
+
+    if (!symmetric){
+      if (has_intercept) betahat = c(muhat, thetahat_asm)
+      if (!has_intercept) betahat = thetahat_asm
+    } else {
+      betahat = betahat_asm
+    }
+
+    betahat = as.vector(betahat)
+    residuals = Y - X %*% betahat
 
     ## compare score matching objective
     scoreobj_new = res_asm$score_obj
@@ -471,49 +579,56 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
 
   }
 
-
-  info_asm = res_asm$info_asm
-  thetahat_asm = res_asm$thetahat
-
-  if (!symmetrize){
+  if (!symmetric){
     I_mat = info_asm * var(Xtilde)
   } else {
     I_mat = info_asm * (1/n) * t(X) %*% X
   }
 
-  v22 = solve(I_mat)
-
-  if (intercept.selection == "mean" && has_intercept) {
-      resid_with_mean = Y - Xtilde %*% thetahat_asm
-      muhat = mean(resid_with_mean)
-      noise_var = var(resid_with_mean)
-      Xbar <- colMeans(Xtilde)
-      v11 = noise_var + Xbar %*% v22 %*% Xbar
-      v12 = Xbar %*% v22
-      Cov_mat = matrix(0, ncol(X), ncol(X))
-      Cov_mat[1, 1] = v11
-      Cov_mat[-1, -1] = v22
-      Cov_mat[1, -1] = v12
-      Cov_mat[-1, 1] = t(v12)
-      std_errs = sqrt(diag(Cov_mat) / n)
-    } else if (intercept.selection == "median" && has_intercept) {
-      resid_with_mean = Y - Xtilde %*% thetahat_asm
-      muhat = median(resid_with_mean)
-      ## needs to be fixed
-      std_errs = c(NA, sqrt(diag(v22) / n))
-      Cov_mat = NULL
-    } else {
-      std_errs = sqrt(diag(v22) / n )
-      Cov_mat = v22
-    }
-
-  if (has_intercept && !symmetrize) {
-    betahat = c(muhat, thetahat_asm)
-  } else {
-    betahat = thetahat_asm
+  if (ncol(Xtilde) > 0 || symmetric){
+    v22 = solve(I_mat)
   }
 
-  betahat = as.vector(betahat)
+  # Use general formula to calculate the full asymptotic covariance matrix,
+  # including the intercept
+  # tau is an estimate of (\int \zeta^2 p_0)/(\int p_0 d\zeta)^2,
+  # where zeta(z) = z when intercept.selection = "mean" and
+  # zeta(z) = q - 1_{z < 0} when intercept.selection = "quantile" and
+  # error_quantile = q
+  if (has_intercept && !symmetric) {
+    Xbar <- colMeans(Xtilde)
+    if (intercept.selection == "mean") {
+      tau <- var(Y - Xtilde %*% thetahat_asm)
+    } else if (intercept.selection == "quantile") {
+      tau <- q*(1 - q) / res_asm$quantile^2
+    }
+    tau <- as.numeric(tau)
+
+    if (ncol(Xtilde) == 0){
+      Cov_mat = matrix(tau, 1, 1)
+      std_errs = rep(tau, 1)
+      I_full = matrix(1/tau, 1, 1)
+    } else {
+      I_full <- info_asm * var(X) + outer(colMeans(X), colMeans(X)) / tau
+
+      v11 = tau + Xbar %*% v22 %*% Xbar
+      v12 = Xbar %*% v22
+      Cov_mat <- I_full
+      Cov_mat[1, 1] = v11
+      Cov_mat[-1, -1] = v22
+      Cov_mat[1, -1] = -v12
+      Cov_mat[-1, 1] = -t(v12)
+
+      stopifnot( max(abs(solve(I_full) - Cov_mat)) < 1e-5 )
+
+      std_errs = sqrt(diag(Cov_mat) / n)
+    }
+  } else {
+    Cov_mat = v22
+    std_errs = sqrt(diag(Cov_mat) / n)
+    I_full <- I_mat
+  }
+
 
   names(std_errs) = colnames(X)
   names(betahat) = colnames(X)
@@ -534,9 +649,12 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
     sig_vals = sig_vals,
     info_asm = info_asm,
     I_mat = I_mat,
+    I_full = I_full,
     Cov_mat = Cov_mat,
     psi = res_asm$psi,
-    symmetrize = symmetrize,
+    conv = res_asm$conv,
+    symmetric = symmetric,
+    xbar = apply(Xtilde, 2, mean),
     intercept.selection = intercept.selection
   )
 
@@ -574,6 +692,20 @@ asm.fit <- function(X, Y, betapilot = "LAD", symmetrize = TRUE,
 #'
 #' @examples
 #' asm(mpg ~ cyl + hp + disp, data=mtcars)
+#'
+#' asm(mpg ~ cyl + hp + disp, data=mtcars, symmetric=FALSE)
+#'
+#' n <- 1000 ; d <- 2
+#' X <- matrix(rnorm(n * d), n, d)
+#' Y <- X %*% c(2, 3) + 1 + rnorm(n)
+#' asm(Y ~ X - 1)
+#'
+#' Y <- X %*% c(2, 3) + rchisq(n, 6) - qchisq(0.4, 6)
+#' asm(Y ~ X, symmetric=FALSE, intercept.selection="quantile", error_quantile=0.4)
+#'
+#' Y <- X %*% c(2, 3) + rcauchy(n)
+#' asm(Y ~ X, symmetric=FALSE, intercept.selection="median")
+#'
 asm <- function(formula, data = NULL, ...) {
   Y = model.response(model.frame(formula, data))
   Xint = model.matrix(formula, data)
@@ -783,6 +915,7 @@ confint.asm <- function(object, parm, level = 0.95, ...) {
 #' @param interval type of interval calculation,
 #' either "none", "confidence" or "prediction". Default is "none".
 #' @param level confidence level
+#' @param debug boolean; enables debug mode
 #' @param ... additional arguments to ensure compatibility with the generic function predict()
 #'
 #' @return matrix of predicted values
@@ -799,54 +932,98 @@ confint.asm <- function(object, parm, level = 0.95, ...) {
 #' X <- rnorm(n)
 #' beta <- 2
 #' Y <- beta*X + rt(n,df=3)
-#' Mod <- asm(Y ~ X)
-#' predict(Mod, newdata = data.frame(X = 1), interval = "prediction")
+#' asm_model <- asm(Y ~ X)
+#' predict(asm_model, newdata = data.frame(X = 1), interval = "prediction")
 #'
 predict.asm <- function(object, newdata = NULL, interval = "none",
-                        level = 0.95, ...) {
+                         level = 0.95, debug = FALSE, ...) {
   if (is.null(newdata))
     return(object$fitted.values)
 
-  if (is.data.frame(newdata)){
-    tt = terms(object$formula)
-    Terms = delete.response(tt)
-    m = model.frame(Terms, newdata, na.action = na.pass)
-    X = model.matrix(Terms, m)
-  } else {
-    X = as.matrix(newdata)
+  if (debug) browser()
+
+  terms <- setdiff(names(object$betahat), "(Intercept)")
+
+  if (is.data.frame(newdata)) {
+    if (all(terms %in% names(newdata)))
+      X <- newdata[, terms]
+    else stop("One or more model variables missing from newdata")
+    if (!all(names(newdata) %in% terms)) warning("Ignoring some variables in newdata")
+    X <- as.matrix(X, ncol = length(terms))
+  }
+  else {
+    if (length(newdata) %% length(terms)) {
+      stop("newdata must be a data frame or matrix, with the number of columns
+         equal to the number of non-intercept coefficients of model$betahat")
+    }
+    X <- matrix(newdata, ncol = length(terms))
   }
 
-  if (any(X[, 1] != 1)) {
+  if (length(object$betahat) > length(terms)) {
     Xint = cbind(1, X)
+    pred = Xint %*% object$betahat
+    beta_has_intercept = TRUE
+    theta = object$betahat[-1]
+    resids = object$residuals + object$betahat[1]
   } else {
-    Xint = X
-    X = as.matrix(X[, -1])
+    pred = X %*% object$betahat
+    beta_has_intercept = FALSE
+    theta = object$betahat
+    resids = object$residuals
   }
+
+
   if (interval == "none") {
-    return(Xint %*% object$betahat)
-  }
-  cov = object$Cov_mat
-
-  if (ncol(cov) != ncol(Xint))
-    stop("covariance matrix is not of the correct dimension")
-
-  n = length(object$residuals)
-  var_pred_mean = colSums(t(Xint) * (cov %*% t(Xint))) / n
-
-  if (interval == "prediction") {
-    var_pred_mean = var_pred_mean + as.numeric(var(object$residuals))
+    return(pred)
   }
 
-  se = sqrt(var_pred_mean)
+  if (interval == "prediction"){
+    cov = object$Cov_mat
+    xbar = object$xbar
 
-  a <- (1 - level)/2
-  a <- c(a, 1 - a)
-  fac <- qnorm(a)
-  predictor = Xint %*% object$betahat
-  predictor = cbind(predictor, predictor + se * fac[1],
-                    predictor + se * fac[2])
-  colnames(predictor) <- c("fit", "lwr", "upr")
-  return(predictor)
+    if (beta_has_intercept){
+      cov = cov[-1, -1]
+    }
+
+    n = length(resids)
+
+    delta = (1 - level)/10
+    upp_quant = level + (1 - level)/2 + delta
+    low_quant = (1 - level)/2 - delta
+
+    pred_low = X %*% theta + quantile(resids, low_quant)
+    pred_upp = X %*% theta + quantile(resids, upp_quant)
+
+    suppressWarnings({
+    supp1 = range(resids) + 3*bw.nrd0(resids) * c(-1, 1)
+    supp2 = median(resids) + IQR(resids) * c(-20, 20)
+    supp = c(max(supp1[1], supp2[1]), min(supp1[2], supp2[2]))
+    resid_kde = density(resids, n = 2^14, from=supp[1], to=supp[2])
+    f = approxfun(resid_kde$x, resid_kde$y, method="linear", rule=2)
+    K = length(resid_kde$x)
+    masses = (resid_kde$y[-1] + resid_kde$y[-K])/2 * diff(resid_kde$x)
+    Fx = c(0, cumsum(masses))
+    masses = masses / Fx[K]
+    Fx = Fx/Fx[K]
+    Q = approxfun(Fx, resid_kde$x, method="linear", rule=2)
+    })
+
+    tau_lo = low_quant * (1-low_quant) / (f(Q(low_quant))^2)
+    tau_upp = upp_quant * (1-upp_quant) / (f(Q(upp_quant))^2)
+
+    tmp = diag(X %*% cov %*% t(X)) - 2 * X %*% cov %*% xbar
+    var_common = tmp + as.numeric(t(xbar) %*% cov %*% xbar)
+
+    se_upp = sqrt(var_common + tau_upp)
+    se_low = sqrt(var_common + tau_lo)
+
+    adj = qnorm(1-delta/2)
+
+    predictor = cbind(pred, pred_low - se_low * adj/sqrt(n),
+                      pred_upp + se_upp*adj/sqrt(n))
+    colnames(predictor) <- c("fit", "lwr", "upr")
+    return(predictor)
+  }
 }
 
 #' Generate diagnostic plots for an \code{asm} regression model

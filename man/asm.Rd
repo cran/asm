@@ -33,4 +33,18 @@ Performs linear regression with a data-driven convex loss function
 }
 \examples{
 asm(mpg ~ cyl + hp + disp, data=mtcars)
+
+asm(mpg ~ cyl + hp + disp, data=mtcars, symmetric=FALSE)
+
+n <- 1000 ; d <- 2
+X <- matrix(rnorm(n * d), n, d)
+Y <- X \%*\% c(2, 3) + 1 + rnorm(n)
+asm(Y ~ X - 1)
+
+Y <- X \%*\% c(2, 3) + rchisq(n, 6) - qchisq(0.4, 6)
+asm(Y ~ X, symmetric=FALSE, intercept.selection="quantile", error_quantile=0.4)
+
+Y <- X \%*\% c(2, 3) + rcauchy(n)
+asm(Y ~ X, symmetric=FALSE, intercept.selection="median")
+
 }
